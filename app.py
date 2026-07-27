@@ -12,13 +12,26 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import warnings
 warnings.filterwarnings("ignore")
 
+# ---------- Sabit: BIST 100 sembollerini Wikipedia'dan çek ----------
+@st.cache_data(ttl=86400)
+def bist100_listesi():
+    url = "https://en.wikipedia.org/wiki/BIST_100"
+    tablo = pd.read_html(url)[0]
+    # Tablo yapısına göre sembol sütunu "Symbol" olabilir, kontrol edip alalım
+    if 'Symbol' in tablo.columns:
+        semboller = tablo['Symbol'].dropna().tolist()
+    else:
+        # Yedek liste
+        semboller = ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "ASELS.IS", "KCHOL.IS"]
+    return [s for s in semboller if isinstance(s, str) and len(s) > 2]
+
 # ---------- Veri çekme ve teknik göstergeler ----------
-@st.cache_data(ttl=3600)  # <-- BU SATIR EKLENDİ
+@st.cache_data(ttl=3600)
 def veri_cek(ticker, donem="1y", aralik="1d"):
     hisse = yf.Ticker(ticker)
     df = hisse.history(period=donem, interval=aralik)
     if df.empty:
-        raise ValueError("Veri çekilemedi. Sembolü kontrol edin.")
+        raise ValueError(f"{ticker} için veri çekilemedi.")
     df.index = df.index.tz_localize(None)
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -129,106 +142,140 @@ def sinyal_uret(df, tahmin_df, risk_profili="dengeli"):
 # ---------- Streamlit Arayüz ----------
 st.set_page_config(page_title="Borsa Asistanım", layout="wide")
 st.title("📈 Zaman Serisi Analizli Kişisel Yatırım Asistanı")
+st.markdown("Bu uygulama, seçtiğiniz hisse için üç farklı zaman serisi modeliyle tahmin yapar ve risk profilinize uygun **AL/SAT/TUT** sinyali üretir. Ayrıca **tüm BIST 100 hisselerini tarama** özelliğine sahiptir.")
 
-sembol = st.text_input("Hisse Sembolü (örn: THYAO.IS, GARAN.IS)", "THYAO.IS")
-risk = st.selectbox("Risk Profiliniz", ["agresif", "dengeli", "muhafazakar"])
-donem = st.selectbox("Geçmiş Veri Aralığı", ["6ay","1y","2y","5y"])
-model_secimi = st.selectbox("Tahmin Modeli", ["Prophet", "ARIMA", "Holt-Winters"])
+# ---------- Kenar Çubuğu: Ayarlar ----------
+with st.sidebar:
+    st.header("⚙️ Ayarlar")
+    # Hisse listesini oluştur
+    try:
+        hisse_listesi = bist100_listesi()
+    except:
+        hisse_listesi = ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "ASELS.IS", "KCHOL.IS"]
+    sembol = st.selectbox("Hisse seçin", hisse_listesi, index=0)
+    
+    risk_aciklama = {
+        "agresif": "Daha yüksek risk alır, küçük sinyallerde bile alım yapar. Kazanç potansiyeli yüksek, kayıp riski de fazladır.",
+        "dengeli": "Orta düzey risk, sinyallerin biraz daha güçlü olmasını bekler. (Varsayılan)",
+        "muhafazakar": "Düşük risk ister, yalnızca çok güçlü sinyallerde alım yapar, kayıp ihtimali en azdır."
+    }
+    risk = st.selectbox(
+        "Risk profiliniz",
+        ["agresif", "dengeli", "muhafazakar"],
+        help="**Agresif:** Hızlı al-sat, yüksek volatiliteye uygun.\n**Dengeli:** Ne çok cesur ne çok temkinli.\n**Muhafazakar:** Uzun vadeli, güvenli liman arayan."
+    )
+    st.caption(risk_aciklama[risk])
 
-donem_haritasi = {
-    "6ay": "6mo",
-    "1y": "1y",
-    "2y": "2y",
-    "5y": "5y"
-}
+    donem = st.selectbox("Geçmiş veri aralığı", ["6 ay", "1 yıl", "2 yıl", "5 yıl"])
+    donem_haritasi = {"6 ay": "6mo", "1 yıl": "1y", "2 yıl": "2y", "5 yıl": "5y"}
+    model_secimi = st.selectbox("Tahmin modeli", ["Prophet", "ARIMA", "Holt-Winters"],
+                                help="**Prophet:** Facebook, tatil/mevsim etkilerini iyi yakalar.\n**ARIMA:** Klasik istatistiksel yöntem.\n**Holt-Winters:** Mevsimsel üstel düzleştirme.")
+    
+    # Toplu tarama butonu
+    st.markdown("---")
+    toplu_tara = st.button("🚀 BIST 100 Hisselerini Toplu Tara")
 
-if st.button("Analiz Et"):
-    with st.spinner("Veri çekiliyor ve model eğitiliyor..."):
-        try:
-            df = veri_cek(sembol, donem=donem_haritasi[donem])
+# ---------- Ana Bölüm ----------
+if not toplu_tara:
+    # Normal tek hisse analizi
+    if st.button("🔍 Seçili Hisseyi Analiz Et"):
+        with st.spinner("Veri çekiliyor ve model eğitiliyor..."):
+            try:
+                df = veri_cek(sembol, donem=donem_haritasi[donem])
+                if model_secimi == "Prophet":
+                    tahmin_df = prophet_tahmin(df, gun=30)
+                elif model_secimi == "ARIMA":
+                    tahmin_df = arima_tahmin(df, gun=30)
+                else:
+                    tahmin_df = holt_winters_tahmin(df, gun=30)
 
-            if model_secimi == "Prophet":
+                sinyal, puan, beklenen_degisim = sinyal_uret(df, tahmin_df, risk)
+
+                kolon1, kolon2, kolon3 = st.columns(3)
+                kolon1.metric("Son Kapanış", f"₺{df['Close'].iloc[-1]:.2f}")
+                kolon2.metric(f"30 Günlük Beklenen Değişim ({model_secimi})", f"%{beklenen_degisim*100:.2f}")
+                kolon3.metric("Sinyal", sinyal, delta=puan)
+
+                # Fiyat grafiği
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Gerçek Fiyat', line=dict(color='blue')))
+                fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Tahmin'],
+                                         name=f'{model_secimi} Tahmini', line=dict(dash='dash', color='orange')))
+                if 'Alt' in tahmin_df.columns and not tahmin_df['Alt'].isna().all():
+                    fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Alt'],
+                                             mode='lines', line=dict(color='gray', dash='dot'), name='Alt Sınır'))
+                    fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Ust'],
+                                             fill='tonexty', mode='lines', line=dict(color='gray', dash='dot'), name='Üst Sınır'))
+                fig.update_layout(title=f"{sembol} – Gerçek ve Tahmini Fiyat ({model_secimi})",
+                                  xaxis_title="Tarih", yaxis_title="Fiyat (₺)")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # RSI
+                st.subheader("RSI (Göreceli Güç Endeksi)")
+                st.caption("RSI, bir hissenin aşırı alım (>70) ya da aşırı satım (<30) bölgesinde olup olmadığını gösterir. 50 orta noktadır.")
+                rsi_fig = go.Figure()
+                rsi_fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')))
+                rsi_fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Aşırı Alım")
+                rsi_fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Aşırı Satım")
+                st.plotly_chart(rsi_fig, use_container_width=True)
+
+                # Teknik gösterge özeti
+                with st.expander("📊 Diğer Teknik Göstergeler"):
+                    st.write(f"**SMA(20):** {df['SMA_20'].iloc[-1]:.2f} (20 günlük basit hareketli ortalama)")
+                    st.write(f"**SMA(50):** {df['SMA_50'].iloc[-1]:.2f} (50 günlük hareketli ortalama)")
+                    st.write(f"**MACD:** {df['MACD'].iloc[-1]:.4f} | **Sinyal:** {df['MACD_sinyal'].iloc[-1]:.4f}")
+                    st.write(f"**Volatilite (20 gün):** %{df['Volatilite'].iloc[-1]*100:.2f}")
+
+                if sinyal == "AL":
+                    st.success(f"✅ Sinyal: **AL** (Puan: {puan:.2f}) – Model alım fırsatı gösteriyor.")
+                elif sinyal == "SAT":
+                    st.error(f"❌ Sinyal: **SAT** (Puan: {puan:.2f}) – Model satış baskısı öngörüyor.")
+                else:
+                    st.warning(f"⏸️ Sinyal: **TUT** (Puan: {puan:.2f}) – Beklemede kalmak daha uygun.")
+
+                st.info(f"🔍 Beklenen değişim %{beklenen_degisim*100:.2f} | Risk: {risk} | Model: {model_secimi}")
+            except Exception as e:
+                st.error(f"❌ Hata: {e}")
+
+else:
+    # ---------- Toplu Tarama Modu ----------
+    st.subheader("📋 BIST 100 Toplu Tarama Sonuçları")
+    st.markdown("Sadece **AL** veya **SAT** sinyali veren hisseler listelenir. Risk profiliniz: **" + risk + "**")
+    with st.spinner("BIST 100 hisseleri taranıyor... Bu işlem biraz zaman alabilir (birkaç dakika). Lütfen bekleyin."):
+        sonuc_listesi = []
+        hata_sayisi = 0
+        # İlerleme çubuğu
+        progress = st.progress(0)
+        for i, sembol in enumerate(hisse_listesi):
+            try:
+                df = veri_cek(sembol, donem="6mo")  # Hızlı olsun diye 6 aylık veri
+                # Model olarak sadece Prophet kullanalım (hız için)
                 tahmin_df = prophet_tahmin(df, gun=30)
-            elif model_secimi == "ARIMA":
-                tahmin_df = arima_tahmin(df, gun=30)
-            elif model_secimi == "Holt-Winters":
-                tahmin_df = holt_winters_tahmin(df, gun=30)
+                sinyal, puan, _ = sinyal_uret(df, tahmin_df, risk)
+                if sinyal in ["AL", "SAT"]:
+                    sonuc_listesi.append({
+                        "Hisse": sembol,
+                        "Sinyal": sinyal,
+                        "Puan": round(puan, 2),
+                        "Son Fiyat": round(df['Close'].iloc[-1], 2)
+                    })
+            except:
+                hata_sayisi += 1
+            # İlerleme çubuğunu güncelle
+            progress.progress((i + 1) / len(hisse_listesi))
+        
+        progress.empty()
+        if sonuc_listesi:
+            sonuc_df = pd.DataFrame(sonuc_listesi)
+            # Sinyale göre renklendirme
+            def renklendir(val):
+                color = 'red' if val == 'SAT' else 'green'
+                return f'color: {color}; font-weight: bold'
+            styled_df = sonuc_df.style.applymap(renklendir, subset=['Sinyal'])
+            st.dataframe(styled_df, use_container_width=True)
+            st.success(f"✅ {len(sonuc_listesi)} hisse sinyal verdi. ({hata_sayisi} hisse veri çekilemedi.)")
+        else:
+            st.warning("Hiçbir hisse AL/SAT sinyali vermedi. Piyasa şu an sizin profilinize uygun fırsat sunmuyor olabilir.")
+        st.caption("Not: Toplu tarama yalnızca Prophet modeli ve 6 aylık veri ile hızlı sonuç içindir.")
 
-            sinyal, puan, beklenen_degisim = sinyal_uret(df, tahmin_df, risk)
-
-            kolon1, kolon2, kolon3 = st.columns(3)
-            kolon1.metric("Son Kapanış", f"₺{df['Close'].iloc[-1]:.2f}")
-            kolon2.metric(f"30 Günlük Beklenen Değişim ({model_secimi})",
-                          f"%{beklenen_degisim*100:.2f}")
-            kolon3.metric("Sinyal", sinyal, delta=puan)
-
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            fig.add_trace(go.Scatter(x=df.index, y=df['Close'],
-                                     name='Gerçek Fiyat', line=dict(color='blue')))
-            fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Tahmin'],
-                                     name=f'{model_secimi} Tahmini', line=dict(dash='dash', color='orange')))
-            if 'Alt' in tahmin_df.columns and not tahmin_df['Alt'].isna().all():
-                fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Alt'],
-                                         mode='lines', line=dict(color='gray', dash='dot'),
-                                         name='Alt Sınır'))
-                fig.add_trace(go.Scatter(x=tahmin_df['Tarih'], y=tahmin_df['Ust'],
-                                         fill='tonexty', mode='lines',
-                                         line=dict(color='gray', dash='dot'),
-                                         name='Üst Sınır'))
-            fig.update_layout(
-                title=f"{sembol} – Gerçek ve Tahmini Fiyat ({model_secimi})",
-                xaxis_title="Tarih",
-                yaxis_title="Fiyat (₺)",
-                legend=dict(x=0.01, y=0.99)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.subheader("RSI Göstergesi")
-            rsi_fig = go.Figure()
-            rsi_fig.add_trace(go.Scatter(x=df.index, y=df['RSI'],
-                                         name='RSI', line=dict(color='purple')))
-            rsi_fig.add_hline(y=70, line_dash="dash", line_color="red",
-                              annotation_text="Aşırı Alım 70")
-            rsi_fig.add_hline(y=30, line_dash="dash", line_color="green",
-                              annotation_text="Aşırı Satım 30")
-            rsi_fig.update_layout(
-                title="RSI (Göreceli Güç Endeksi)",
-                xaxis_title="Tarih",
-                yaxis_title="RSI Değeri"
-            )
-            st.plotly_chart(rsi_fig, use_container_width=True)
-
-            if st.checkbox("Tüm modelleri karşılaştır"):
-                st.subheader("Model Tahminleri Karşılaştırması")
-                modeller = {
-                    "Prophet": prophet_tahmin(df, 30),
-                    "ARIMA": arima_tahmin(df, 30),
-                    "Holt-Winters": holt_winters_tahmin(df, 30)
-                }
-                karsilastirma_fig = go.Figure()
-                karsilastirma_fig.add_trace(go.Scatter(x=df.index, y=df['Close'],
-                                                       name='Gerçek Fiyat', line=dict(color='blue')))
-                renkler = ['orange', 'green', 'red']
-                for (isim, fdf), renk in zip(modeller.items(), renkler):
-                    karsilastirma_fig.add_trace(go.Scatter(x=fdf['Tarih'], y=fdf['Tahmin'],
-                                                           name=isim, line=dict(color=renk, dash='dot')))
-                karsilastirma_fig.update_layout(
-                    title="Tüm Modellerin Tahmin Karşılaştırması",
-                    xaxis_title="Tarih",
-                    yaxis_title="Fiyat (₺)"
-                )
-                st.plotly_chart(karsilastirma_fig, use_container_width=True)
-
-            if sinyal == "AL":
-                st.success(f"✅ Sinyal: **AL** (Puan: {puan:.2f}) – Model {model_secimi} alım fırsatı gösteriyor.")
-            elif sinyal == "SAT":
-                st.error(f"❌ Sinyal: **SAT** (Puan: {puan:.2f}) – Model {model_secimi} satış baskısı öngörüyor.")
-            else:
-                st.warning(f"⏸️ Sinyal: **TUT** (Puan: {puan:.2f}) – Şu an beklemede kalmak daha uygun görünüyor.")
-
-            st.info(f"🔍 Detay: Beklenen değişim %{beklenen_degisim*100:.2f} | Risk profili: **{risk}** | Model: **{model_secimi}**")
-
-        except Exception as e:
-            st.error(f"❌ Hata oluştu: {e}")
-
-st.caption("⚠️ Bu uygulama yalnızca eğitim ve kişisel gelişim amaçlıdır. Kesinlikle yatırım tavsiyesi içermez.")
+st.sidebar.caption("⚠️ Bu uygulama eğitim amaçlıdır, yatırım tavsiyesi değildir.")
