@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from ta import add_all_ta_features
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from prophet import Prophet
@@ -19,6 +18,8 @@ def fetch_stock_data(ticker, period="1y", interval="1d"):
     df = stock.history(period=period, interval=interval)
     if df.empty:
         raise ValueError("Veri çekilemedi.")
+    # Zaman dilimini kaldır (Prophet ve diğerleri için)
+    df.index = df.index.tz_localize(None)
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
@@ -32,6 +33,7 @@ def fetch_stock_data(ticker, period="1y", interval="1d"):
 
 # ---------- Zaman Serisi Modelleri ----------
 def forecast_prophet(df, periods=30):
+    df = df.copy()
     df_prophet = df[['Close']].reset_index()
     df_prophet.columns = ['ds', 'y']
     model = Prophet(daily_seasonality=True)
@@ -43,7 +45,6 @@ def forecast_prophet(df, periods=30):
     return forecast_df.reset_index(drop=True)
 
 def forecast_arima(df, periods=30):
-    # pmdarima ile otomatik ARIMA seçimi
     model = pm.auto_arima(df['Close'], seasonal=False, trace=False,
                           error_action='ignore', suppress_warnings=True,
                           stepwise=True)
@@ -59,14 +60,13 @@ def forecast_arima(df, periods=30):
     return forecast_df
 
 def forecast_holt_winters(df, periods=30):
-    # Mevsimsellik periyodu: haftalık (5 iş günü) varsayalım, günlük veride 5
+    # Haftalık mevsimsellik periyodu 5 (günlük veri)
     model = ExponentialSmoothing(df['Close'], trend='add', seasonal='add',
                                  seasonal_periods=5)
     fitted = model.fit()
     forecast = fitted.forecast(periods)
     last_date = df.index[-1]
     future_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=periods)
-    # Güven aralıkları basit bir simülasyonla verilebilir, burada gösterilmeyecek
     forecast_df = pd.DataFrame({
         'Date': future_dates,
         'Forecast': forecast,
@@ -75,7 +75,7 @@ def forecast_holt_winters(df, periods=30):
     })
     return forecast_df
 
-# ---------- Kişisel sinyal (artık seçilen modele göre) ----------
+# ---------- Kişisel sinyal ----------
 def generate_signal_from_forecast(df, forecast_df, risk_profile="moderate"):
     last_close = df['Close'].iloc[-1]
     future_price = forecast_df['Forecast'].iloc[-1]
@@ -168,7 +168,7 @@ if st.button("Analiz Et"):
                                          name='Üst Sınır'))
             st.plotly_chart(fig, use_container_width=True)
 
-            # Teknik Göstergeler
+            # RSI Göstergesi
             st.subheader("RSI Göstergesi")
             rsi_fig = go.Figure()
             rsi_fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI'))
@@ -176,7 +176,7 @@ if st.button("Analiz Et"):
             rsi_fig.add_hline(y=30, line_dash="dash", line_color="green")
             st.plotly_chart(rsi_fig, use_container_width=True)
 
-            # İsteğe bağlı: Bütün modelleri karşılaştırma (opsiyonel buton)
+            # İsteğe bağlı: Tüm modelleri karşılaştır
             if st.checkbox("Tüm modelleri karşılaştır"):
                 st.subheader("Model Tahminleri Karşılaştırması")
                 models = {
