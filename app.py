@@ -17,11 +17,9 @@ warnings.filterwarnings("ignore")
 def bist100_listesi():
     url = "https://en.wikipedia.org/wiki/BIST_100"
     tablo = pd.read_html(url)[0]
-    # Tablo yapısına göre sembol sütunu "Symbol" olabilir, kontrol edip alalım
     if 'Symbol' in tablo.columns:
         semboller = tablo['Symbol'].dropna().tolist()
     else:
-        # Yedek liste
         semboller = ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "ASELS.IS", "KCHOL.IS"]
     return [s for s in semboller if isinstance(s, str) and len(s) > 2]
 
@@ -147,7 +145,6 @@ st.markdown("Bu uygulama, seçtiğiniz hisse için üç farklı zaman serisi mod
 # ---------- Kenar Çubuğu: Ayarlar ----------
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    # Hisse listesini oluştur
     try:
         hisse_listesi = bist100_listesi()
     except:
@@ -155,29 +152,27 @@ with st.sidebar:
     sembol = st.selectbox("Hisse seçin", hisse_listesi, index=0)
     
     risk_aciklama = {
-        "agresif": "Daha yüksek risk alır, küçük sinyallerde bile alım yapar. Kazanç potansiyeli yüksek, kayıp riski de fazladır.",
-        "dengeli": "Orta düzey risk, sinyallerin biraz daha güçlü olmasını bekler. (Varsayılan)",
-        "muhafazakar": "Düşük risk ister, yalnızca çok güçlü sinyallerde alım yapar, kayıp ihtimali en azdır."
+        "agresif": "Yüksek risk, küçük sinyallerle alım yapar. Kazanç da kayıp da büyük olabilir.",
+        "dengeli": "Orta düzey risk, sinyaller biraz daha güçlü olunca harekete geçer.",
+        "muhafazakar": "Düşük risk, sadece çok güçlü sinyallerde alım yapar."
     }
     risk = st.selectbox(
         "Risk profiliniz",
         ["agresif", "dengeli", "muhafazakar"],
-        help="**Agresif:** Hızlı al-sat, yüksek volatiliteye uygun.\n**Dengeli:** Ne çok cesur ne çok temkinli.\n**Muhafazakar:** Uzun vadeli, güvenli liman arayan."
+        help="**Agresif:** Hızlı al-sat, volatiliteye uygun.\n**Dengeli:** Ne çok cesur ne çok temkinli.\n**Muhafazakar:** Uzun vadeli, güvenli liman."
     )
     st.caption(risk_aciklama[risk])
 
     donem = st.selectbox("Geçmiş veri aralığı", ["6 ay", "1 yıl", "2 yıl", "5 yıl"])
     donem_haritasi = {"6 ay": "6mo", "1 yıl": "1y", "2 yıl": "2y", "5 yıl": "5y"}
     model_secimi = st.selectbox("Tahmin modeli", ["Prophet", "ARIMA", "Holt-Winters"],
-                                help="**Prophet:** Facebook, tatil/mevsim etkilerini iyi yakalar.\n**ARIMA:** Klasik istatistiksel yöntem.\n**Holt-Winters:** Mevsimsel üstel düzleştirme.")
+                                help="**Prophet:** Tatil/mevsim etkilerini iyi yakalar.\n**ARIMA:** Klasik istatistiksel model.\n**Holt-Winters:** Mevsimsel üstel düzleştirme.")
     
-    # Toplu tarama butonu
     st.markdown("---")
     toplu_tara = st.button("🚀 BIST 100 Hisselerini Toplu Tara")
 
 # ---------- Ana Bölüm ----------
 if not toplu_tara:
-    # Normal tek hisse analizi
     if st.button("🔍 Seçili Hisseyi Analiz Et"):
         with st.spinner("Veri çekiliyor ve model eğitiliyor..."):
             try:
@@ -212,16 +207,15 @@ if not toplu_tara:
 
                 # RSI
                 st.subheader("RSI (Göreceli Güç Endeksi)")
-                st.caption("RSI, bir hissenin aşırı alım (>70) ya da aşırı satım (<30) bölgesinde olup olmadığını gösterir. 50 orta noktadır.")
+                st.caption("RSI, bir hissenin aşırı alım (>70) ya da aşırı satım (<30) bölgesinde olup olmadığını gösterir.")
                 rsi_fig = go.Figure()
                 rsi_fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')))
                 rsi_fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Aşırı Alım")
                 rsi_fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Aşırı Satım")
                 st.plotly_chart(rsi_fig, use_container_width=True)
 
-                # Teknik gösterge özeti
                 with st.expander("📊 Diğer Teknik Göstergeler"):
-                    st.write(f"**SMA(20):** {df['SMA_20'].iloc[-1]:.2f} (20 günlük basit hareketli ortalama)")
+                    st.write(f"**SMA(20):** {df['SMA_20'].iloc[-1]:.2f} (20 günlük hareketli ortalama)")
                     st.write(f"**SMA(50):** {df['SMA_50'].iloc[-1]:.2f} (50 günlük hareketli ortalama)")
                     st.write(f"**MACD:** {df['MACD'].iloc[-1]:.4f} | **Sinyal:** {df['MACD_sinyal'].iloc[-1]:.4f}")
                     st.write(f"**Volatilite (20 gün):** %{df['Volatilite'].iloc[-1]*100:.2f}")
@@ -241,15 +235,13 @@ else:
     # ---------- Toplu Tarama Modu ----------
     st.subheader("📋 BIST 100 Toplu Tarama Sonuçları")
     st.markdown("Sadece **AL** veya **SAT** sinyali veren hisseler listelenir. Risk profiliniz: **" + risk + "**")
-    with st.spinner("BIST 100 hisseleri taranıyor... Bu işlem biraz zaman alabilir (birkaç dakika). Lütfen bekleyin."):
+    with st.spinner("BIST 100 hisseleri taranıyor... Bu işlem birkaç dakika sürebilir. Lütfen bekleyin."):
         sonuc_listesi = []
         hata_sayisi = 0
-        # İlerleme çubuğu
         progress = st.progress(0)
         for i, sembol in enumerate(hisse_listesi):
             try:
-                df = veri_cek(sembol, donem="6mo")  # Hızlı olsun diye 6 aylık veri
-                # Model olarak sadece Prophet kullanalım (hız için)
+                df = veri_cek(sembol, donem="6mo")
                 tahmin_df = prophet_tahmin(df, gun=30)
                 sinyal, puan, _ = sinyal_uret(df, tahmin_df, risk)
                 if sinyal in ["AL", "SAT"]:
@@ -261,21 +253,50 @@ else:
                     })
             except:
                 hata_sayisi += 1
-            # İlerleme çubuğunu güncelle
             progress.progress((i + 1) / len(hisse_listesi))
-        
         progress.empty()
+        
         if sonuc_listesi:
             sonuc_df = pd.DataFrame(sonuc_listesi)
-            # Sinyale göre renklendirme
+            # Düzeltme: applymap yerine map kullan
             def renklendir(val):
-                color = 'red' if val == 'SAT' else 'green'
-                return f'color: {color}; font-weight: bold'
-            styled_df = sonuc_df.style.applymap(renklendir, subset=['Sinyal'])
+                if isinstance(val, str):
+                    if val == 'AL':
+                        return 'color: green; font-weight: bold'
+                    elif val == 'SAT':
+                        return 'color: red; font-weight: bold'
+                return ''
+            styled_df = sonuc_df.style.map(renklendir, subset=['Sinyal'])
             st.dataframe(styled_df, use_container_width=True)
             st.success(f"✅ {len(sonuc_listesi)} hisse sinyal verdi. ({hata_sayisi} hisse veri çekilemedi.)")
         else:
-            st.warning("Hiçbir hisse AL/SAT sinyali vermedi. Piyasa şu an sizin profilinize uygun fırsat sunmuyor olabilir.")
+            st.warning("Hiçbir hisse AL/SAT sinyali vermedi. Piyasa şu an profilinize uygun fırsat sunmuyor olabilir.")
         st.caption("Not: Toplu tarama yalnızca Prophet modeli ve 6 aylık veri ile hızlı sonuç içindir.")
 
-st.sidebar.caption("⚠️ Bu uygulama eğitim amaçlıdır, yatırım tavsiyesi değildir.")
+# ---------- Borsa Terimleri Rehberi ----------
+with st.expander("📖 Borsa Terimleri Rehberi (Yeni Başlayanlar İçin)"):
+    st.markdown("""
+    - **Hisse Senedi (Sembol):** Bir şirketin ortaklık payı. Borsada kısaltma ile işlem görür (ör: THYAO.IS = Türk Hava Yolları).
+    - **RSI (Göreceli Güç Endeksi):** 0 ile 100 arasında değer alır. 70'in üzeri "aşırı alım" (fiyat çok yükseldi, düşebilir), 30'un altı "aşırı satım" (fiyat çok düştü, yükselebilir) anlamına gelir.
+    - **SMA (Basit Hareketli Ortalama):** Belirli bir gün sayısının kapanış fiyatlarının ortalamasıdır. Örneğin SMA(20), son 20 günün ortalama fiyatını gösterir. Fiyat SMA'nın üzerindeyse yükseliş trendi, altındaysa düşüş trendi olabilir.
+    - **MACD (Hareketli Ortalama Yakınsama Iraksama):** İki farklı hareketli ortalamanın farkından oluşur. MACD çizgisi sinyal çizgisini yukarı keserse alım, aşağı keserse satım sinyali olarak yorumlanır.
+    - **Volatilite:** Fiyattaki dalgalanmanın ölçüsüdür. Yüksek volatilite büyük fiyat hareketleri, yani yüksek risk demektir.
+    - **AL / SAT / TUT Sinyali:** Modelin, sizin risk profilinize göre ürettiği öneridir. **AL:** Hisseyi almayı düşünebilirsiniz. **SAT:** Elinizde varsa satmayı, yoksa uzak durmayı düşünebilirsiniz. **TUT:** Mevcut durumda beklemek daha uygun olabilir.
+    - **Puan:** Modelin hesapladığı sinyal gücüdür. Yüksek pozitif puan güçlü AL, yüksek negatif puan güçlü SAT anlamına gelir.
+    - **Risk Profili:** 
+        - *Agresif:* Yüksek risk alır, küçük sinyallerde işlem yapar.
+        - *Dengeli:* Orta risk, sinyaller belirginleşince harekete geçer.
+        - *Muhafazakâr:* Düşük risk, sadece çok güçlü sinyallerde alım yapar.
+    - **Zaman Serisi Tahmin Modelleri:** Geçmiş fiyat hareketlerine bakarak geleceği tahmin etmeye çalışan matematiksel modellerdir. Prophet Facebook tarafından geliştirilmiş olup tatil ve mevsim etkilerini dikkate alır. ARIMA klasik bir istatistiksel yöntemdir. Holt-Winters mevsimsel dalgalanmaları yakalar.
+    """)
+
+# ---------- Tahmin Güvenilirliği Uyarısı ----------
+st.warning("""
+⚠️ **Tahminler Ne Kadar Güvenilir?**  
+Bu uygulama, geçmiş fiyat verilerine dayanarak matematiksel tahminler yapar. **Hiçbir model geleceği kesin olarak bilemez.**  
+Borsa; ekonomik haberler, siyasi olaylar, şirket bilançoları gibi birçok faktörden anında etkilenir.  
+Burada gördüğünüz sinyaller yalnızca **eğitim ve fikir verme amaçlıdır**, yatırım tavsiyesi değildir.  
+Yatırım kararlarınızı mutlaka kendi araştırmanızı yaparak ve bir finans uzmanına danışarak alın.
+""")
+
+st.caption("⚠️ Bu uygulama yalnızca eğitim ve kişisel gelişim amaçlıdır. Kesinlikle yatırım tavsiyesi içermez.")
