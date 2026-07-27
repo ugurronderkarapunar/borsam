@@ -13,6 +13,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ---------- Veri çekme ve teknik göstergeler ----------
+@st.cache_data(ttl=3600)  # <-- BU SATIR EKLENDİ
 def veri_cek(ticker, donem="1y", aralik="1d"):
     hisse = yf.Ticker(ticker)
     df = hisse.history(period=donem, interval=aralik)
@@ -134,7 +135,6 @@ risk = st.selectbox("Risk Profiliniz", ["agresif", "dengeli", "muhafazakar"])
 donem = st.selectbox("Geçmiş Veri Aralığı", ["6ay","1y","2y","5y"])
 model_secimi = st.selectbox("Tahmin Modeli", ["Prophet", "ARIMA", "Holt-Winters"])
 
-# Dönem haritası (Streamlit seçenekleri İngilizce olmamalı)
 donem_haritasi = {
     "6ay": "6mo",
     "1y": "1y",
@@ -156,14 +156,12 @@ if st.button("Analiz Et"):
 
             sinyal, puan, beklenen_degisim = sinyal_uret(df, tahmin_df, risk)
 
-            # Sonuç metrikleri
             kolon1, kolon2, kolon3 = st.columns(3)
             kolon1.metric("Son Kapanış", f"₺{df['Close'].iloc[-1]:.2f}")
             kolon2.metric(f"30 Günlük Beklenen Değişim ({model_secimi})",
                           f"%{beklenen_degisim*100:.2f}")
             kolon3.metric("Sinyal", sinyal, delta=puan)
 
-            # Fiyat ve tahmin grafiği
             fig = make_subplots(specs=[[{"secondary_y": True}]])
             fig.add_trace(go.Scatter(x=df.index, y=df['Close'],
                                      name='Gerçek Fiyat', line=dict(color='blue')))
@@ -185,7 +183,6 @@ if st.button("Analiz Et"):
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # RSI Göstergesi
             st.subheader("RSI Göstergesi")
             rsi_fig = go.Figure()
             rsi_fig.add_trace(go.Scatter(x=df.index, y=df['RSI'],
@@ -201,7 +198,6 @@ if st.button("Analiz Et"):
             )
             st.plotly_chart(rsi_fig, use_container_width=True)
 
-            # Tüm modelleri karşılaştır
             if st.checkbox("Tüm modelleri karşılaştır"):
                 st.subheader("Model Tahminleri Karşılaştırması")
                 modeller = {
@@ -223,7 +219,6 @@ if st.button("Analiz Et"):
                 )
                 st.plotly_chart(karsilastirma_fig, use_container_width=True)
 
-            # Sinyal açıklaması
             if sinyal == "AL":
                 st.success(f"✅ Sinyal: **AL** (Puan: {puan:.2f}) – Model {model_secimi} alım fırsatı gösteriyor.")
             elif sinyal == "SAT":
