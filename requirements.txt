@@ -8,3 +8,4 @@ ta
 statsmodels
 pmdarima
 scikit-learn
+tefas
